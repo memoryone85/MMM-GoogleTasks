@@ -1,6 +1,7 @@
 var NodeHelper = require("node_helper");
 const {google} = require('googleapis');
 const fs = require('fs');
+const Log = require('logger');
 
 module.exports = NodeHelper.create({
 
@@ -13,8 +14,10 @@ module.exports = NodeHelper.create({
     },
 
     socketNotificationReceived: function(notification, payload) {
+        Log.log("Got notification");
 
-        if (notification === "MODULE_READY") {
+        if (notification === "MODULE_READY")
+        {
             if(!this.service) {
                 this.authenticate();
             } else {
@@ -22,8 +25,16 @@ module.exports = NodeHelper.create({
                 console.log("TASKS SERVICE ALREADY RUNNING, DONT NEED TO AUTHENTICATE AGAIN")
                 this.sendSocketNotification("SERVICE_READY", {});
             }
-        } else if (notification === "REQUEST_UPDATE") {
+        }
+        else if (notification === "REQUEST_UPDATE")
+        {
             this.getList(payload);
+        }
+        else if (notification === "TOGGLE_COMPLETE")
+        {
+            console.log("Toggling task completion");
+            
+            this.setComplete(payload.config, payload.task);
         }
     },
 
@@ -88,4 +99,48 @@ module.exports = NodeHelper.create({
             self.sendSocketNotification("UPDATE_DATA", payload);
         });
     },
+    
+    setComplete: function(config, item)
+    {
+        var self = this;
+        
+        if (!self.service) {
+            console.log("Refresh required"); 
+            return;
+        }
+        
+        if (item.status === "completed")
+        {
+            item.status = "needsAction";
+        }
+        else
+        {
+            item.status = "completed";
+        }
+        self.service.tasks.update({
+            tasklist: config.listID,
+            task: item.id,
+            requestBody: item,
+        }, (err, res) => {
+            if (err) return console.error('The API returned an error: ' + err);
+
+            // Testing
+            /* 
+            const tasksList = res.data.items;
+            console.log(tasksList);
+            if (tasksList) {
+                tasksList.forEach((task) => {
+                    console.log(task);
+                });
+            } else {
+                console.log('No tasks found.');
+            }
+             */
+             
+             self.getList(config);
+
+            //var payload = {id: config.listID, items: res.data.items};
+            //self.sendSocketNotification("UPDATE_DATA", payload);
+        });
+    }
 });

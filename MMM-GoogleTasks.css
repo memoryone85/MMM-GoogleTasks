@@ -9,6 +9,10 @@
       padding-bottom: .25em;
       }
 
+  .MMM-GoogleTasks .item.title.done {
+      text-decoration: line-through;
+  }
+
   /* .MMM-GoogleTasks .item.title {
   } */
 

@@ -1,10 +1,10 @@
+
 Module.register("MMM-GoogleTasks", {
   // Default module config.
   defaults: {
     listID: "", // List ID (see authenticate.js)
     maxResults: 10,
     showCompleted: false, //set showCompleted and showHidden true
-    ordering: "myorder", // Order by due date, title, updated timestamp or by 'my order'
     dateFormat: "MMM Do", // Format to display dates (moment.js formats)
     updateInterval: 10000, // Time between content updates (millisconds)
     animationSpeed: 2000, // Speed of the update animation (milliseconds)
@@ -50,33 +50,36 @@ Module.register("MMM-GoogleTasks", {
   },
 
   socketNotificationReceived: function (notification, payload) {
+      var self = this;
     if (notification === "SERVICE_READY") {
-      this.sendSocketNotification("REQUEST_UPDATE", this.config);
+      self.sendSocketNotification("REQUEST_UPDATE", self.config);
 
       // Create repeating call to node_helper get list
       setInterval(function () {
-        this.sendSocketNotification("REQUEST_UPDATE", this.config);
-      }, this.config.updateInterval);
+        self.sendSocketNotification("REQUEST_UPDATE", self.config);
+      }, self.config.updateInterval);
 
       // Check if payload id matches module id
     } else if (
       notification === "UPDATE_DATA" &&
-      payload.id === this.config.listID
+      payload.id === self.config.listID
     ) {
       // Handle new data
-      this.loaded = true;
+      self.loaded = true;
       if (payload.items) {
-        this.tasks = payload.items;
-        this.updateDom(this.config.animationSpeed);
+        self.tasks = payload.items;
+        self.updateDom(self.config.animationSpeed);
       } else {
-        this.tasks = null;
+        self.tasks = null;
         Log.info("No tasks found.");
-        this.updateDom(this.config.animationSpeed);
+        self.updateDom(self.config.animationSpeed);
       }
     }
   },
 
   getDom: function () {
+    var self = this;
+
     let wrapper = document.createElement("div");
     wrapper.className = "container ";
     wrapper.className += this.config.tableClass;
@@ -86,52 +89,43 @@ Module.register("MMM-GoogleTasks", {
       wrapper.className = this.config.tableClass + " dimmed";
       return wrapper;
     }
+    
+    let nowDate = new Date();
+    nowDate.setHours(0);
+    nowDate.setMinutes(0);
+    nowDate.setSeconds(0);
+    let nowTime = nowDate.getTime();
+    this.tasks = this.tasks
+        .filter((task) => task.parent === undefined) // Filter tasks to only parent tasks
+        .filter(function(task)
+        {
+            let taskDate = new Date(task.due);
+            taskDate.setHours(0);
+            taskDate.setMinutes(0);
+            taskDate.setSeconds(0);
+            return taskDate.getTime() <= nowTime;
+        });
 
     // Sort attributes like they are shown in the Tasks app
-    switch (this.config.ordering) {
-      case "myorder":
-        let temp = [];
-        this.tasks
-          .filter((task) => task.parent === undefined) // Filter tasks to only parent tasks
-          .sort((a, b) => (a.position > b.position ? 1 : -1)) // Sort parent tasks by position
-          .forEach((task) => {
-            // Map over parents to create reordered list of tasks
-            temp.push(task);
-
-            // Loop through all tasks to find and sort subtasks for each parent
-            let subList = [];
-            this.tasks.map((subtask) => {
-              if (subtask.parent === task.id) {
-                subList.push(subtask);
-              }
-            });
-            subList.sort((a, b) => (a.position > b.position ? 1 : -1));
-            temp.push(...subList);
-          });
-        this.tasks = temp;
-        break;
-
-      case "due":
-      case "title":
-      case "updated":
-        this.tasks = this.tasks.sort((a, b) =>
-          a[this.config.ordering] > b[this.config.ordering] ? 1 : -1
-        );
-        break;
-    }
+    this.tasks = this.tasks.sort((a, b) =>
+      a.due > b.due ? 1 : -1
+    );
 
     let titleWrapper, dateWrapper, noteWrapper;
 
     this.tasks.forEach((item, index) => {
       titleWrapper = document.createElement("div");
       titleWrapper.className = "item title";
-      titleWrapper.innerHTML =
-        '<i class="fa fa-circle-thin" ></i>' + item.title;
-
+      
       // If item is completed change icon to checkmark
-      if (item.status === "completed") {
-        titleWrapper.innerHTML = '<i class="fa fa-check" ></i>' + item.title;
+      let bullet = (item.status === "completed" ? "fa-check" : "fa-circle-thin");
+      if (item.status === "completed")
+      {
+          titleWrapper.className += " done";
       }
+      
+      titleWrapper.innerHTML =
+        '<i class="fa ' + bullet + '" ></i>' + item.title;
 
       if (item.parent) {
         titleWrapper.className = "item child";
@@ -151,12 +145,14 @@ Module.register("MMM-GoogleTasks", {
         let date = moment(item.due);
         dateWrapper.innerHTML = date.utc().format(this.config.dateFormat);
       }
-
-      // Create borders between parent items
-      if (index < this.tasks.length - 1 && !this.tasks[index + 1].parent) {
-        titleWrapper.style.borderBottom = "1px solid #666";
-        dateWrapper.style.borderBottom = "1px solid #666";
-      }
+      
+      let thisItem = item;
+      titleWrapper.addEventListener("click", (event) =>
+      {
+          Log.log("Clicked");
+          event.target.style.backgroundColor = 'salmon';
+          self.sendSocketNotification("TOGGLE_COMPLETE", {config:self.config, task:thisItem});
+      });
 
       wrapper.appendChild(titleWrapper);
       wrapper.appendChild(dateWrapper);
