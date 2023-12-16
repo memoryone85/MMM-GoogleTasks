@@ -1,5 +1,7 @@
 # MMM-GoogleTasks
 
+***NOTE: This is customized to my own needs. If you came across this fork, you're probably better off using the parent repo.***
+
 Module for the [MagicMirror²](https://github.com/MichMich/MagicMirror/) smart mirror.
 
 Displays tasks from Google Tasks App
