@@ -67,9 +67,43 @@ Module.register("MMM-GoogleTasks", {
       // Handle new data
       self.loaded = true;
       if (payload.items) {
+          
+        let nowDate = new Date();
+        nowDate.setHours(0);
+        nowDate.setMinutes(0);
+        nowDate.setSeconds(0);
+        let nowTime = nowDate.getTime();
+          if (payload.items
+                .filter((task) => task.parent === undefined) // Filter tasks to only parent tasks
+                .filter(function(task)
+                {
+                    let taskDate = new Date(task.due);
+                    taskDate.setHours(0);
+                    taskDate.setMinutes(0);
+                    taskDate.setSeconds(0);
+                    return taskDate.getTime() <= nowTime;
+                })
+                .some( (item) => item.status !== "completed" ))
+          {
+            self.sendNotification("USER_PRESENCE", true);
+            self.didSendEmptyPresence = false;
+          }
+          else
+          {
+              if (!self.didSendEmptyPresence)
+              {
+                self.sendNotification("USER_PRESENCE", true);
+                self.didSendEmptyPresence = true;
+              }
+          }
         self.tasks = payload.items;
         self.updateDom(self.config.animationSpeed);
       } else {
+          if (!self.didSendEmptyPresence)
+          {
+            self.sendNotification("USER_PRESENCE", true);
+            self.didSendEmptyPresence = true;
+          }
         self.tasks = null;
         Log.info("No tasks found.");
         self.updateDom(self.config.animationSpeed);
