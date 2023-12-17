@@ -111,9 +111,9 @@ Module.register("MMM-GoogleTasks", {
       a.due > b.due ? 1 : -1
     );
 
-    let titleWrapper, dateWrapper, noteWrapper;
-
     this.tasks.forEach((item, index) => {
+      let titleWrapper, dateWrapper, noteWrapper;
+      
       titleWrapper = document.createElement("div");
       titleWrapper.className = "item title";
       
@@ -150,7 +150,7 @@ Module.register("MMM-GoogleTasks", {
       titleWrapper.addEventListener("click", (event) =>
       {
           Log.log("Clicked");
-          event.target.style.backgroundColor = 'salmon';
+          titleWrapper.style.backgroundColor = 'salmon';
           self.sendSocketNotification("TOGGLE_COMPLETE", {config:self.config, task:thisItem});
       });
 
