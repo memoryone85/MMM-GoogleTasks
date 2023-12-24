@@ -9,28 +9,13 @@ Module.register("MMM-GoogleTasks", {
         updateInterval: 10000, // Time between content updates (millisconds)
         animationSpeed: 2000, // Speed of the update animation (milliseconds)
         tableClass: "small" // Name of the classes issued from main.css
-
-        // Pointless for a mirror, not currently implemented
-        /* 
-        dueMax: "2040-07-11T18:30:00.000Z", // RFC 3339 timestamp 
-        dueMin: "1970-07-11T18:30:00.000Z", // RFC 3339 timestamp 
-        completedMax: "2040-07-11T18:30:00.000Z", //only if showCompleted true (RFC 3339 timestamp)
-        completedMin: "1970-07-11T18:30:00.000Z", //only if showCompleted true (RFC 3339 timestamp)
-        */
     },
 
     // Define required scripts
-    getScripts: function ()
-    {
-        return ["moment.js"];
-    },
-
-    // Define required scripts.
-    getStyles: function ()
-    {
-        return ["font-awesome.css", "MMM-GoogleTasks.css"];
-    },
-
+    getScripts: function () { return ["moment.js", "api_protocol.js"]; },
+    getStyles: function () { return ["font-awesome.css", "MMM-GoogleTasks.css"]; },
+    
+    
     // Define start sequence
     start: function ()
     {
@@ -43,7 +28,7 @@ Module.register("MMM-GoogleTasks", {
         }
         else
         {
-            this.sendSocketNotification("MODULE_READY", {});
+            this.sendSocketNotification(TaskApi.REQ_Connect, {});
         }
 
         // API requies completed config settings if showCompleted
@@ -61,18 +46,19 @@ Module.register("MMM-GoogleTasks", {
     socketNotificationReceived: function (notification, payload)
     {
         var self = this;
-        if (notification === "SERVICE_READY") {
-            self.sendSocketNotification("REQUEST_UPDATE", self.config);
+        if (notification === TaskApi.RSP_ServiceReady)
+        {
+            self.sendSocketNotification(TaskApi.REQ_FetchAllTasks, self.config);
 
             // Create repeating call to node_helper get list
             setInterval(function ()
                 {
-                    self.sendSocketNotification("REQUEST_UPDATE", self.config);
+                    self.sendSocketNotification(TaskApi.REQ_FetchAllTasks, self.config);
                 }, self.config.updateInterval);
 
             // Check if payload id matches module id
         }
-        else if (notification === "UPDATE_DATA" && payload.id === self.config.listID)
+        else if (notification === TaskApi.RSP_AllTasksData && payload.id === self.config.listID)
         {
             // Handle new data
             self.loaded = true;
@@ -82,18 +68,38 @@ Module.register("MMM-GoogleTasks", {
                 nowDate.setHours(0);
                 nowDate.setMinutes(0);
                 nowDate.setSeconds(0);
+                nowDate.setMilliseconds(0);
                 let nowTime = nowDate.getTime();
-                if (payload.items
+                
+                self.tasks = payload.items
                     .filter((task) => task.parent === undefined) // Filter tasks to only parent tasks
                     .filter(function(task)
+                    {
+                        let taskDate = new Date(task.due);
+                        taskDate.setHours(0);
+                        taskDate.setMinutes(0);
+                        taskDate.setSeconds(0);
+                        taskDate.setMilliseconds(0);
+                        let taskTime = taskDate.getTime();
+                        // Don't need tasks from the future.
+                        if (taskTime > nowTime)
                         {
-                            let taskDate = new Date(task.due);
-                            taskDate.setHours(0);
-                            taskDate.setMinutes(0);
-                            taskDate.setSeconds(0);
-                            return taskDate.getTime() <= nowTime;
-                        })
-                    .some( (item) => item.status !== "completed" ))
+                            return false;
+                        }
+                        // Don't need completed tasks from the past.
+                        if (taskTime < nowTime)
+                        {
+                            if (task.status === "completed")
+                            {
+                                return false;
+                            }
+                        }
+                        return true;
+                    });
+                this._sortTasks();
+
+                if (this.tasks
+                    .some((task) => task.status !== "completed"))
                 {
                     self.sendNotification("USER_PRESENCE", true);
                     self.didSendEmptyPresence = false;
@@ -106,7 +112,7 @@ Module.register("MMM-GoogleTasks", {
                         self.didSendEmptyPresence = true;
                     }
                 }
-                self.tasks = payload.items;
+                
                 self.updateDom(self.config.animationSpeed);
             }
             else
@@ -121,7 +127,37 @@ Module.register("MMM-GoogleTasks", {
                 self.updateDom(self.config.animationSpeed);
             }
         }
+        else if (notification == TaskApi.RSP_TaskDataPushed && payload.listID === self.config.listID)
+        {
+            // #TEMP: Request all tasks, since we've finished modifying one. But actually, we should be able to just
+            // assume the change we made is good, and leave it up to the regular scheduled update to actually do anything.
+            self.sendSocketNotification(TaskApi.REQ_FetchAllTasks, self.config);
+        }
     },
+    
+    
+    _sortTasks: function()
+    {
+        if (this.tasks)
+        {
+            // Sort attributes like they are shown in the Tasks app
+            this.tasks.sort(function(a, b)
+            {
+                let aCompleted = (a.status === "completed");
+                let bCompleted = (b.status === "completed");
+                if (aCompleted != bCompleted)
+                {
+                    return aCompleted ? 1 : -1;
+                }
+                if (a.due != b.due)
+                {
+                    return a.due > b.due ? 1 : -1;
+                }
+                return a.id < b.id ? -1 : 1;
+            });
+        }
+    },
+    
 
     getDom: function ()
     {
@@ -137,25 +173,6 @@ Module.register("MMM-GoogleTasks", {
             wrapper.className = this.config.tableClass + " dimmed";
             return wrapper;
         }
-
-        let nowDate = new Date();
-        nowDate.setHours(0);
-        nowDate.setMinutes(0);
-        nowDate.setSeconds(0);
-        let nowTime = nowDate.getTime();
-        this.tasks = this.tasks
-            .filter((task) => task.parent === undefined) // Filter tasks to only parent tasks
-            .filter(function(task)
-                {
-                    let taskDate = new Date(task.due);
-                    taskDate.setHours(0);
-                    taskDate.setMinutes(0);
-                    taskDate.setSeconds(0);
-                    return taskDate.getTime() <= nowTime;
-                });
-
-        // Sort attributes like they are shown in the Tasks app
-        this.tasks = this.tasks.sort((a, b) => a.due > b.due ? 1 : -1);
 
         this.tasks.forEach((item, index) =>
             {
@@ -200,7 +217,17 @@ Module.register("MMM-GoogleTasks", {
                     {
                         Log.log("Clicked");
                         titleWrapper.style.backgroundColor = 'salmon';
-                        self.sendSocketNotification("TOGGLE_COMPLETE", {config:self.config, task:thisItem});
+                        
+                        if (item.status === "completed")
+                        {
+                            item.status = "needsAction";
+                        }
+                        else
+                        {
+                            item.status = "completed";
+                        }
+
+                        self.sendSocketNotification(TaskApi.REQ_PushTaskData, {config:self.config, task:thisItem});
                     });
 
                 wrapper.appendChild(titleWrapper);

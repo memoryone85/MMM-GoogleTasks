@@ -3,10 +3,15 @@ const {google} = require('googleapis');
 const fs = require('fs');
 const Log = require('logger');
 
+const TaskApi = require("./api_protocol.js");
+
+
 module.exports = NodeHelper.create({
 
     start: function()
     {
+        this.NodeHelperName = this.name + ".NodeHelper";
+        
         console.log("Starting node helper for: " + this.name);
 
         this.oAuth2Client;
@@ -15,42 +20,39 @@ module.exports = NodeHelper.create({
 
     socketNotificationReceived: function(notification, payload)
     {
-        Log.log("Got notification");
+        Log.log(this.NodeHelperName + ": Notification: " + notification);
 
-        if (notification === "MODULE_READY")
+        if (notification === TaskApi.REQ_Connect)
         {
-            if (!this.service)
-            {
-                this.authenticate();
-            }
-            else
-            {
-                // Check if tasks service is already running, avoids running authentication twice
-                console.log("TASKS SERVICE ALREADY RUNNING, DONT NEED TO AUTHENTICATE AGAIN")
-                this.sendSocketNotification("SERVICE_READY", {});
-            }
+            this.authenticate();
         }
-        else if (notification === "REQUEST_UPDATE")
+        else if (notification === TaskApi.REQ_FetchAllTasks)
         {
             this.getList(payload);
         }
-        else if (notification === "TOGGLE_COMPLETE")
+        else if (notification === TaskApi.REQ_PushTaskData)
         {
-            console.log("Toggling task completion");
-            
-            this.setComplete(payload.config, payload.task);
+            this.pushTaskData(payload.config, payload.task);
         }
     },
 
     authenticate: function()
     {
+        if (this.service)
+        {
+            // Check if tasks service is already running, avoids running authentication twice
+            console.log(this.NodeHelperName + ": TASKS SERVICE ALREADY RUNNING, DONT NEED TO AUTHENTICATE AGAIN")
+            this.sendSocketNotification(TaskApi.RSP_ServiceReady, {});
+            return;
+        }
+        
         var self = this;
 
         fs.readFile(self.path + '/credentials.json', (err, content) =>
             {
                 if (err)
                 {
-                    return console.log('Error loading client secret file:', err);
+                    return console.error(this.NodeHelperName + ': Error loading client secret file:', err);
                 }
                 
                 // Authorize a client with credentials, then call the Google Tasks API.
@@ -67,7 +69,7 @@ module.exports = NodeHelper.create({
                 {
                     if (err)
                     {
-                        return console.log('Error loading token');
+                        return console.error(this.NodeHelperName + ': Error loading token');
                     }
                     self.oAuth2Client.setCredentials(JSON.parse(token));
                     callback(self.oAuth2Client, self);
@@ -78,7 +80,7 @@ module.exports = NodeHelper.create({
     startTasksService: function(auth, self)
     {
         self.service = google.tasks({version: 'v1', auth});
-        self.sendSocketNotification("SERVICE_READY", {});
+        self.sendSocketNotification(TaskApi.RSP_ServiceReady, {});
     },
 
     getList: function(config)
@@ -87,39 +89,28 @@ module.exports = NodeHelper.create({
 
         if (!self.service)
         {
-            console.log("Refresh required"); 
+            console.error(this.NodeHelperName + ": Refresh required"); 
             return;
         }
 
         self.service.tasks.list({
             tasklist: config.listID,
-            maxResults: config.maxResults,
+            //maxResults: config.maxResults,
             showCompleted: config.showCompleted,
             showHidden: config.showHidden
             }, (err, res) =>
             {
-                if (err) return console.error('The API returned an error: ' + err);
-
-                // Testing
-                /* 
-                const tasksList = res.data.items;
-                console.log(tasksList);
-                if (tasksList)
+                if (err)
                 {
-                    tasksList.forEach((task) => { console.log(task); });
+                    return console.error(this.NodeHelperName + ': The API returned an error: ' + err);
                 }
-                else
-                {
-                    console.log('No tasks found.');
-                }
-                */
 
                 var payload = {id: config.listID, items: res.data.items};
-                self.sendSocketNotification("UPDATE_DATA", payload);
+                self.sendSocketNotification(TaskApi.RSP_AllTasksData, payload);
             });
     },
 
-    setComplete: function(config, item)
+    pushTaskData: function(config, item)
     {
         var self = this;
 
@@ -129,40 +120,18 @@ module.exports = NodeHelper.create({
             return;
         }
 
-        if (item.status === "completed")
-        {
-            item.status = "needsAction";
-        }
-        else
-        {
-            item.status = "completed";
-        }
-
         self.service.tasks.update({
             tasklist: config.listID,
             task: item.id,
             requestBody: item,
             }, (err, res) =>
             {
-                if (err) return console.error('The API returned an error: ' + err);
-
-                // Testing
-                /* 
-                const tasksList = res.data.items;
-                console.log(tasksList);
-                if (tasksList) {
-                    tasksList.forEach((task) => {
-                        console.log(task);
-                    });
-                } else {
-                    console.log('No tasks found.');
+                if (err)
+                {
+                    return console.error(this.NodeHelperName + ': The API returned an error: ' + err);
                 }
-                */
-
-                self.getList(config);
-
-                //var payload = {id: config.listID, items: res.data.items};
-                //self.sendSocketNotification("UPDATE_DATA", payload);
+                
+                self.sendSocketNotification(TaskApi.RSP_TaskDataPushed, {listID:config.listID, taskID:item.id});
             });
     }
 });
