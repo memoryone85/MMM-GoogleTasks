@@ -54,9 +54,10 @@ Module.register("MMM-GoogleTasks", {
       this.sendSocketNotification("REQUEST_UPDATE", this.config);
 
       // Create repeating call to node_helper get list
+      var self = this;
       setInterval(function () {
-        this.sendSocketNotification("REQUEST_UPDATE", this.config);
-      }, this.config.updateInterval);
+        self.sendSocketNotification("REQUEST_UPDATE", self.config);
+      }, self.config.updateInterval);
 
       // Check if payload id matches module id
     } else if (
